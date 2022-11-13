@@ -7,6 +7,120 @@ date: "2022-11-10"
 ```{r}
 library(tidyverse)
 library(rvest)
+library(broom)
+set.seed(1)
 knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 1
+
+Importing data 
+```{r}
+problem_1 = 
+list.files(path = "/data")
+```
+
+## Problem 2
+
+Importing and describing raw data: 
+
+```{r}
+homicide_data = read_csv(file = "./data/homicide-data.csv") %>%
+  janitor::clean_names()
+skimr::skim(homicide_data)
+```
+The CSV file was downloaded from the GitHub repository, imported, and cleaned. The dataset `homicide_data` has 52,179 rows and 12 columns. The dataset contains information on the homicide ID number, reported date, the victim's first and last name, race, age, sex, location of homicide (including city, state, longtidue, and latitude), and disposition of the case. While there are 0 missing variables for variables `uid`, `victim_last`, `victim_first`, `victim_race`, `victim_age`, `victim_sex`, `city`, `state`, `disposition`, and `reported date`, there are 60 missing variables for `lat` and `lon`. 
+
+
+Creating variable `city_state`:
+
+```{r}
+homicide_data$city_state <- as.character(paste(homicide_data$city, homicide_data$state, sep = "_"))
+```
+
+Creating variable `unsolved_homicide`: 
+
+The variable `unsolved_homicide` was created. Those with the disposition "Closed without arrest" or "Open/No arrest" were categorised as an unsolved homicide and were therefore given a value of 1 in the variable `unsolved_homicide`. Those with the disposition "Closed by arrest" were categorised as a solved homicide and were therefore given a value of 0 in the variable `unsolved_homicide`. 
+
+```{r}
+homicide_data %>%
+  mutate(
+    unsolved_homicide = 
+      if_else(disposition == "Closed by arrest", 0, 1)
+  ) %>%
+  group_by(city_state, unsolved_homicide) %>%
+  summarise(n_obs = n()) %>%
+  spread(key= unsolved_homicide, value = n_obs) %>%
+  knitr::kable()
+
+homicide_data %>%
+  group_by(city_state) %>%
+  summarise(n_obs = n()) %>%
+  knitr::kable()
+```
+
+The city with the most homicides was Chicago, IL with 5,535 homicides - 1,462 of which were solved and 4,073 were unsolved. 
+
+```{r}
+
+```
+
+
+
+## Problem 3
+
+Setting the design elements for the model `problem_3_mean_p`: 
+```{r}
+problem_3_mean_p = function(samp_size = 30, mu, sigma = 5) {
+  
+  sim_data = 
+    tibble(
+    x = rnorm(n = samp_size, mean = mu, sd = sigma),
+  )
+  
+  sim_data %>% 
+    t.test() %>%
+    tidy() %>%
+    select(estimate, p.value)
+    
+}
+```
+
+Generating 5000 datasets from the model with mu = (0, 1, 2, 3, 4, 5, 6):
+```{r, eval = FALSE}
+n_list = 
+  list(
+    "mu = 0" = 0,
+    "mu = 1" = 1,
+    "mu = 2" = 2,
+    "mu = 3" = 3,
+    "mu = 4" = 4,
+    "mu = 5" = 5,
+    "mu = 6" = 6
+  )
+
+problem_3_output = vector("list", length = 7)
+
+for (i in 1:7) {
+  
+  problem_3_output[[i]] = 
+    rerun(5000, problem_3_mean_p(mu = n_list[[i]])) %>%
+    bind_rows()
+  
+}
+```
+
+Creating a plot to demonstrate the proportion of times the null was rejected (the power of the test) on the y axis and the true value of mu on the x axis. 
+```{r, eval = FALSE}
+problem_3_df = 
+  expand_grid(
+    sample_size = 30,
+    iter = 1:5000
+  ) %>%
+  mutate(
+    estimate_df = map(sample_size, problem_3_mean_p)) %>%
+  unnest(estimate_df)
+
+
 ```
 
