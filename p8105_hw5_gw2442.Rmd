@@ -9,6 +9,7 @@ library(tidyverse)
 library(rvest)
 library(broom)
 library(patchwork)
+library(dplyr)
 set.seed(1)
 
 knitr::opts_chunk$set(
@@ -75,17 +76,18 @@ This plot suggests high within-subject correlation -- subjects who start above a
 
 ## Problem 2
 
-Importing and describing raw data: 
+#### Importing and describing raw data: 
 
 ```{r}
 homicide_data = read_csv(file = "./data/homicide-data.csv") %>%
   janitor::clean_names()
 skimr::skim(homicide_data)
 ```
+
 The CSV file was downloaded from the GitHub repository, imported, and cleaned. The dataset `homicide_data` has 52,179 rows and 12 columns. The dataset contains information on the homicide ID number, reported date, the victim's first and last name, race, age, sex, location of homicide (including city, state, longtidue, and latitude), and disposition of the case. While there are 0 missing variables for variables `uid`, `victim_last`, `victim_first`, `victim_race`, `victim_age`, `victim_sex`, `city`, `state`, `disposition`, and `reported date`, there are 60 missing variables for `lat` and `lon`. 
 
 
-Creating variable `city_state`:
+#### Creating variable `city_state`:
 
 ```{r}
 homicide_data =
@@ -94,56 +96,88 @@ homicide_data =
     city_state = as.character(paste(city, state, sep = "_")))
 ```
 
-Creating variable `unsolved_homicide`: 
+#### Creating variable `unsolved_homicide`: 
 
 The variable `unsolved_homicide` was created. Those with the disposition "Closed without arrest" or "Open/No arrest" were categorised as an unsolved homicide and were therefore given a value of 1 in the variable `unsolved_homicide`. Those with the disposition "Closed by arrest" were categorised as a solved homicide and were therefore given a value of 0 in the variable `unsolved_homicide`. 
 
 ```{r}
 homicide_data = 
   homicide_data %>%
-  mutate(unsolved_homicide = ifelse (disposition == "Closed by arrest", 0, 1))
+  mutate(unsolved_homicide = ifelse(disposition == "Closed by arrest", 0, 1)) 
 
-homicide_data %>%
-  group_by(city_state) %>%
-  summarise(n_obs = n()) %>%
-  arrange(desc(n_obs)) %>%
-  knitr::kable()
-
-homicide_data %>%
+homicide_summary_data = 
+  homicide_data %>%
   group_by(city_state, unsolved_homicide) %>%
-  summarise(n_obs = n()) %>%
+  summarise(n_obs = n())%>%
   spread(key = unsolved_homicide, value = n_obs) %>%
+  select(city_state, solved = `0`, unsolved = `1`) %>%
+  drop_na()
+
+homicide_summary_data$sum <- homicide_summary_data$solved + homicide_summary_data$unsolved 
+
+homicide_summary_data %>%
+  arrange(desc(sum)) %>%
   knitr::kable()
 ```
 
-The city with the most homicides was Chicago, IL with 5,535 homicides - 1,462 of which were solved and 4,073 were unsolved. Philadelpha, PA is the city with the second most homicides (3,307), followed by Houston, TX with 2,842 homicides. 
+The city with the most homicides was Chicago, IL with 5,535 homicides - 1,462 of which were solved and 4,073 were unsolved. Philadelpha, PA is the city with the second most homicides (3,307), followed by Houston, TX (2,842)  
+
+#### `prop.test` for Baltimore 
+
+The function `prop.test` is run for the city of Baltimore to determine the estimate proportion of homicides that are unsovled and its confidence intervals:
 
 ```{r}
-homicide_data %>%
-  filter(city_state == "Baltimore_MD") %>%
-  count(unsolved_homicide) 
+baltimore_test = 
+  homicide_summary_data %>%
+  filter(city_state == "Baltimore_MD") 
 
-  prop.test(x = 1825, n = (1825+1002), conf.level = 0.95)%>%
+baltimore_output = 
+  prop.test(baltimore_test %>% pull(unsolved), baltimore_test %>% pull(sum), conf.level = 0.95) %>%
   broom::tidy() %>%
-  select(estimate, starts_with("conf"))
+  select(estimate, conf.low, conf.high)
 
-
-prop_homicide_unsolved = function(x) {
-  
-  group_by(unsolved_homicide) %>%
-    summarise(n_obs = n()) %>%
-    
-    prop.test(x = )
-    
-}
-
+baltimore_output %>%
+  knitr::kable()
 ```
 
+#### `prop.test` for each of the cities 
 
+The function `prop.test`is run for each of the cities in the dataset `homicide_summary_dataset`:
+
+```{r}
+b = map2(homicide_summary_data$unsolved, homicide_summary_data$sum, ~prop.test(x = .x, n = .y, conf.level = 0.95))
+c = map(.x = b, ~broom::tidy(.x))
+d = map(.x = c, ~select(.x, estimate, conf.low, conf.high)) %>%
+  tibble() %>%
+  unnest()
+
+homicide_summary_analysis =
+  cbind(homicide_summary_data, d) %>%
+  select(city_state, estimate, conf.low, conf.high) %>%
+  arrange(desc(estimate)) 
+```
+
+The subsequent tidied dataset `homicide_summary_analysis` demonstrates the estimated proportion of unsolved murders, and lower and upper limit of the 95% confidence interval for each city. It is arranged in descending order. This dataset was obtained first using map2 to map the function `prop.test` onto each city. Map was then used to tidy the `prop.test` output, and was used once again to select specifically for the variables `estimate`, `conf.low`, and `conf.high`. 
+
+#### Creating a plot that shows the estimates and confidence intervals for each city:
+
+```{r}
+homicide_summary_analysis %>%
+  ggplot(aes(x = reorder(city_state, estimate), y = estimate, colour = city_state)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_point() +
+  labs(title = "Estimated proportion of unsolved homicides for each city",
+       x = "City, State",
+       y = "Estimate") +
+       theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+The plot above demonstrates the estimated proportion of unsolved homicides for each city, and its corresponding error bars, arranged in ascending order. From the plot, it can be concluded that Chicago, IL has the highest proportion of unsovled murders, followed by New Orleans, LA and Baltimore, MD. 
 
 ## Problem 3
 
-Setting the design elements for the model `problem_3_mean_p`: 
+#### Setting the design elements for the model `problem_3_mean_p`: 
+
 ```{r}
 problem_3_mean_p = function(samp_size = 30, mu, sigma = 5) {
   
@@ -160,7 +194,10 @@ problem_3_mean_p = function(samp_size = 30, mu, sigma = 5) {
 }
 ```
 
-The function above is then applied to mu = 0, 1, 2, 3, 4, 5, and 6. For each value of mu, 5000 datasets are generated. The output is then converted into a tibble with variables `mu`, `estimate`, and `p.value`. 
+#### Repeating simulation for multiple values of mu 
+
+The function created is then applied to mu = 0, 1, 2, 3, 4, 5, and 6. For each value of mu, 5000 datasets are generated. The output is then converted into a tibble with variables `mu`, `estimate`, and `p.value`.
+
 ```{r}
 n_list = 
   list(
@@ -195,7 +232,10 @@ problem_3_output =
   select(mu, estimate, p.value)
 ```
 
+#### Plot of power vs true value of mu
+
 Creating a plot to demonstrate the proportion of times the null was rejected (the power of the test) on the y axis and the true value of mu on the x axis. 
+
 ```{r}
 problem_3_output %>%
   mutate(reject = ifelse (p.value < 0.05, 1, 0)) %>%
@@ -210,10 +250,15 @@ problem_3_output %>%
     y = "Power"
   )
 ```
+
 Power is the probability that a test of significance will detect a deviation from the null hypothesis, should the deviation exist. The statistical power of a significance test depends on sample size, significance level (alpha), and effect size. As the plot above demonstrates, as effect size increases, the power increases. 
 
+#### Plot of average estimate of mu and true value of mu
+
+#### Plot of average estimate of mu where null was rejected and true value of mu
 
 Creating a plot showing the average estimate of mu on the y axis and true value of mu on the x axis and a plot showing the average estimate of mu only in samples for which the null was rejected on the y axis and the true value of mu on the x axis:
+
 ```{r}
 problem_3_output %>%
   group_by(mu) %>%
@@ -235,8 +280,8 @@ problem_3_output %>%
   labs(
     title = "Average estimate only for samples where null is rejected vs True value of mu",
     x = "True value of mu",
-    y = "Average estimate of mu only for samples where null is rejected"
-  )
+    y = "Average estimate of mu only for samples where null is rejected")
   
 ```
+
 As the plots above indicate, the sample average of mu across tests for which the null is rejected is not approximately equal to the true value of mu. 
